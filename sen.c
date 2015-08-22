@@ -1,17 +1,21 @@
 #include <stdio.h>
+#include <stdint.h>
 
 void exit(int status);
 void *calloc(size_t number, size_t size);
 int strcmp(const char *s1, const char *s2);
 int atoi(const char *nptr);
 
-#define num(x)             ((int) x)
-#define ptr(x)             ((int *) x)
+typedef uintptr_t word;
+
+#define wordsize           (sizeof(word))
+#define num(x)             ((word) x)
+#define ptr(x)             ((word *) x)
 #define car(x)             *ptr(x)
 #define cdr(x)             *ptr(x+1)
-#define push()             tmp = car(rexp); car(rexp) = rstack; rstack = rexp; rexp = tmp
-#define pop()              tmp = rstack; rstack = car(rstack); car(tmp) = rexp; rexp = tmp
-#define popval(to)         pop(); to = cdr(rexp); 
+#define push()             tmp = ptr(car(rexp)); car(rexp) = num(rstack); rstack = rexp; rexp = tmp
+#define pop()              tmp = rstack; rstack = ptr(car(rstack)); car(tmp) = num(rexp); rexp = tmp
+#define popval(to)         pop(); to = ptr(cdr(rexp)); 
 #define combp(x)           ptr((num(x) & 1))
 #define tagp(x)            ptr((num(x) & 1))
 #define ttag(x)            ptr((num(x) ^ 1))
@@ -20,10 +24,10 @@ int atoi(const char *nptr);
 #define setbit_mark(x)     (num(x) | mask)
 #define unsetbit_mark(x)   (num(x) ^ mask)
 #define need(n)            if (nfree < n) { goto recycle; } else { nfree -= n; }
-#define get4()             popval(r1); popval(r2); popval(r3); pop(); r4 = cdr(rexp)
-#define get3()             popval(r1); popval(r2); pop(); r3 = cdr(rexp)
-#define get2()             popval(r1); pop(); r2 = cdr(rexp)
-#define consto(reg, a, b)  tmp = rfree; rfree = cdr(tmp); car(tmp) = a; cdr(tmp) = b; reg = tmp
+#define get4()             popval(r1); popval(r2); popval(r3); pop(); r4 = ptr(cdr(rexp))
+#define get3()             popval(r1); popval(r2); pop(); r3 = ptr(cdr(rexp))
+#define get2()             popval(r1); pop(); r2 = ptr(cdr(rexp))
+#define consto(reg, a, b)  tmp = rfree; rfree = ptr(cdr(tmp)); car(tmp) = num(a); cdr(tmp) = num(b); reg = tmp
 #define tok_s               5
 #define tok_k               9
 #define tok_i              13
@@ -39,23 +43,23 @@ int atoi(const char *nptr);
 #define tok_in             53
 #define tok_nil            57
 
-int *Heap;
-int *rfree;
-int nfree;
-int *rt1;
+word *Heap;
+word *rfree;
+word nfree;
+word *rt1;
 
 int out_bits, out_chr, in_bits, in_chr;
 int heap_size;
 int verbose;
 
-void mark(int *this) {
-   int *foo;
-   int *parent = NULL;
+void mark(word *this) {
+   word *foo;
+   word *parent = NULL;
    process: 
       if(combp(this) || isbit_mark(car(this))) {
          goto backtrack;
       } else {   
-         foo = car(this);
+         foo = ptr(car(this));
          car(this) = setbit_mark(parent);
          parent = ttag(this);
          this = foo;
@@ -66,14 +70,14 @@ void mark(int *this) {
          return;         
       } else if(tagp(parent)) {
          parent = ttag(parent);
-         foo = cdr(parent);
+         foo = ptr(cdr(parent));
          cdr(parent) = unsetbit_mark(car(parent));
          car(parent) = setbit_mark(this);
          this = foo;
          goto process;
       } else {
-         foo = cdr(parent);
-         cdr(parent) = this;
+         foo = ptr(cdr(parent));
+         cdr(parent) = num(this);
          this = parent;
          parent = foo;
          goto backtrack;
@@ -81,7 +85,7 @@ void mark(int *this) {
 }
 
 void collect_freelist () {
-   int *pos = Heap + heap_size - 2;
+   word *pos = Heap + heap_size - 2;
    rfree = NULL;
    nfree = 0;
    while(pos != Heap ) {
@@ -89,13 +93,13 @@ void collect_freelist () {
          car(pos) = unsetbit_mark(car(pos));
       } else {
          nfree++;
-         cdr(pos) = rfree;
+         cdr(pos) = num(rfree);
          rfree = pos;
       }
       pos -= 2;
    }
    if (verbose) 
-      fprintf(stderr, "%dK of %dK used]\n", (((heap_size/2) - nfree)*8)/1024, ((heap_size/2)*8)/1024);
+      fprintf(stderr, "%dK of %dK used]\n", (((heap_size/2) - nfree)*wordsize*2)/1024, ((heap_size/2)*wordsize*2)/1024);
    if (!rfree) {
       puts("sen: out of heap space.");
       exit(1);
@@ -104,7 +108,7 @@ void collect_freelist () {
 
 void init (int argc, char *argv[]) {
    int k;
-   heap_size = 4 * 1024 * 256; 
+   heap_size = wordsize * 1024 * 256; 
    verbose = 0;
    for (k=1; k<argc; k++) {
       if (strcmp(argv[k], "-H") == 0) {
@@ -128,7 +132,7 @@ void init (int argc, char *argv[]) {
          exit(-1);
       }
    }
-   Heap  = (int *) calloc(heap_size, sizeof(int *));
+   Heap  = (word *) calloc(heap_size, sizeof(word *));
    if (!Heap) {
       puts("Unable to allocate initial memory.");
       exit(1);
@@ -138,14 +142,14 @@ void init (int argc, char *argv[]) {
    collect_freelist();
 }
 
-int *rdexp () {
-   int *this, *tmp;
+word *rdexp () {
+   word *this, *tmp;
    switch(getc(stdin)) {
       case 97: { 
          consto(this, tok_nil, tok_nil);
          nfree--;
-         car(this) = rdexp();
-         cdr(this) = rdexp();
+         car(this) = num(rdexp());
+         cdr(this) = num(rdexp());
          break; 
       }
       case 98:  this = ptr(tok_b); break;
@@ -163,8 +167,8 @@ int *rdexp () {
    return this;
 }
 
-int *make_output_handler () {
-   int *this, *tmp;
+word *make_output_handler () {
+   word *this, *tmp;
    consto(this, tok_c, tok_i);
    consto(this, this, tok_p1);
    consto(this, tok_c, this);
@@ -183,59 +187,59 @@ int revb (int k) {
    return j;
 }
 
-void eval (int *rexp, int *Heap) {
-   int *rstack;
-   int *tmp;
-   int *r1;
-   int *r2;
-   int *r3;
-   int *r4;
+void eval (word *rexp, word *Heap) {
+   word *rstack;
+   word *tmp;
+   word *r1;
+   word *r2;
+   word *r3;
+   word *r4;
    r1 = r2 = r3 = r4 = rstack = tmp = ptr(tok_nil);
    recurse:
    if(combp(rexp)) {
-      switch((int) rexp) {
+      switch((word) rexp) {
          case tok_i:
             popval(r1); 
             pop();
-            car(rexp) = r1;
+            car(rexp) = num(r1);
             push();
             break;
          case tok_k:
             popval(r1);
             pop();
             car(rexp) = tok_i;
-            cdr(rexp) = r1;
+            cdr(rexp) = num(r1);
             break;
          case tok_t:
             need(1);
             get2();
-            car(rexp) = r1;
+            car(rexp) = num(r1);
             consto(r1, r1, r2);
-            cdr(rexp) = r1;
+            cdr(rexp) = num(r1);
             push();
             break;
          case tok_b:
             need(1);
             get3();
-            car(rexp) = r1;
+            car(rexp) = num(r1);
             consto(r2, r2, r3);
-            cdr(rexp) = r2;
+            cdr(rexp) = num(r2);
             push();
             break;
          case tok_c:
             need(1);
             get3();
             consto(r1, r1, r3);
-            car(rexp) = r1;
-            cdr(rexp) = r2;
+            car(rexp) = num(r1);
+            cdr(rexp) = num(r2);
             break;
          case tok_bx:
             need(2);
             get4();
-            car(rexp) = r1;
+            car(rexp) = num(r1);
             consto(r3, r3, r4);
             consto(r2, r2, r3);
-            cdr(rexp) = r2;
+            cdr(rexp) = num(r2);
             push();
             break;
          case tok_cx:
@@ -243,8 +247,8 @@ void eval (int *rexp, int *Heap) {
             get4();
             consto(r2, r2, r4);
             consto(r1, r1, r2);
-            car(rexp) = r1;
-            cdr(rexp) = r3;
+            car(rexp) = num(r1);
+            cdr(rexp) = num(r3);
             push();
             push();
             break;
@@ -253,9 +257,9 @@ void eval (int *rexp, int *Heap) {
             get4();
             consto(r2, r2, r4);
             consto(r1, r1, r2);
-            car(rexp) = r1;
+            car(rexp) = num(r1);
             consto(r3, r3, r4);
-            cdr(rexp) = r3;
+            cdr(rexp) = num(r3);
             push();
             push();
             break;
@@ -264,8 +268,8 @@ void eval (int *rexp, int *Heap) {
             get3();
             consto(r1, r1, r3);
             consto(r2, r2, r3);
-            car(rexp) = r1;
-            cdr(rexp) = r2;
+            car(rexp) = num(r1);
+            cdr(rexp) = num(r2);
             push();
             push();
             break;
@@ -281,7 +285,7 @@ void eval (int *rexp, int *Heap) {
          case tok_y:
             pop();
             car(rexp) = cdr(rexp);
-            cdr(rexp) = rexp;
+            cdr(rexp) = num(rexp);
             break;
          case tok_in:
             need(6);
@@ -345,7 +349,7 @@ void eval (int *rexp, int *Heap) {
 }
 
 int main (int argc, char *argv[]) {
-   int *program, *tmp;
+   word *program, *tmp;
    init(argc, argv);
    program = rdexp();
    nfree -= 6;
